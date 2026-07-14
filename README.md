@@ -1,5 +1,8 @@
 # CodeGraphViz
 
+<img width="3793" height="1766" alt="image" src="https://github.com/user-attachments/assets/525f3752-33ae-4c5f-8f2c-9f5064f6dbcc" />
+
+
 A dependency graph visualizer for JavaScript codebases that don't use modules —
 the classic "pile of scripts sharing a global namespace" style (no `import`,
 no bundler, everything talks through shared globals at runtime).
