@@ -1,0 +1,19 @@
+{
+  "name": "codegraphviz",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "node src/languages/javascript/build-graph.js",
+    "build:history": "node src/languages/javascript/build-history-graph.js",
+    "start": "node serve.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Dependency graph visualizer for non-modular JavaScript codebases, with optional git-history playback.",
+  "dependencies": {
+    "acorn": "^8.17.0",
+    "acorn-walk": "^8.3.5"
+  }
+}

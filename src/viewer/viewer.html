@@ -1,0 +1,656 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>CodeGraphViz</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0b0d12; overflow: hidden; font-family: system-ui, sans-serif; }
+  svg { width: 100vw; height: 100vh; display: block; }
+  .link { stroke: #4a5568; }
+  .node circle { stroke: #0b0d12; stroke-width: 1px; cursor: pointer; }
+  .node text {
+    fill: #cbd5e1; font-size: 10px; pointer-events: none; paint-order: stroke;
+    stroke: #0b0d12; stroke-width: 3px; opacity: 0; transition: opacity 0.15s;
+  }
+  .node.label-visible text { opacity: 1; }
+  .node.dim { opacity: 0.08; }
+  .link.dim { opacity: 0.03 !important; }
+
+  #panel {
+    position: fixed; top: 10px; left: 10px; color: #cbd5e1; font-size: 12px;
+    background: rgba(15,17,23,0.85); border: 1px solid #2d3340; border-radius: 8px;
+    padding: 14px; width: 260px; backdrop-filter: blur(4px);
+    user-select: none; box-sizing: border-box;
+  }
+  #panel input[type=text] { user-select: text; }
+  #panel input[type=text] { width: 100%; box-sizing: border-box; margin-bottom: 8px;
+    background: #1a1e28; border: 1px solid #2d3340; color: #e2e8f0; border-radius: 4px; padding: 4px 6px; }
+  #panel .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; min-width: 0; }
+  #panel .row label { flex: 0 0 100px; color: #94a3b8; }
+  #panel .row input[type=range] { flex: 1 1 auto; min-width: 0; }
+  #panel .row span.val { flex: 0 0 40px; text-align: right; color: #cbd5e1; }
+  #stats { color: #64748b; margin-top: 8px; font-size: 11px; }
+  #panel .section { color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; margin: 10px 0 2px; }
+  #tooltip {
+    position: fixed; pointer-events: none; background: rgba(15,17,23,0.95); border: 1px solid #2d3340;
+    color: #e2e8f0; padding: 6px 9px; border-radius: 6px; font-size: 12px; display: none; max-width: 320px; z-index: 10;
+  }
+  .node.unborn { display: none; }
+  .link.unborn { display: none; }
+  .node.pulse circle { animation: pulseAnim 0.9s ease-out; }
+  @keyframes pulseAnim {
+    0% { filter: drop-shadow(0 0 0px #fff); }
+    30% { filter: drop-shadow(0 0 10px #fff); }
+    100% { filter: drop-shadow(0 0 0px #fff); }
+  }
+
+  #historyBar {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    background: rgba(15,17,23,0.9); border: 1px solid #2d3340; border-radius: 10px;
+    padding: 10px 16px; display: none; align-items: center; gap: 10px;
+    width: min(900px, 80vw); box-sizing: border-box; backdrop-filter: blur(4px);
+    color: #cbd5e1; font-size: 12px; user-select: none;
+  }
+  #historyBar.active { display: flex; }
+  #historyBar button {
+    background: #1a1e28; border: 1px solid #2d3340; color: #e2e8f0; border-radius: 6px;
+    width: 30px; height: 30px; cursor: pointer; font-size: 14px; flex: 0 0 auto;
+  }
+  #historyBar button:hover { background: #232837; }
+  #historyBar input[type=range] { flex: 1; }
+  #historyDate { flex: 0 0 auto; width: 220px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+  #historySettingsBtn { flex: 0 0 auto; }
+  #noGit { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); color: #64748b; font-size: 12px; display: none; }
+  #noGraph {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #cbd5e1; font-size: 14px; line-height: 1.6; text-align: center; display: none;
+    background: rgba(15,17,23,0.9); border: 1px solid #2d3340; border-radius: 10px;
+    padding: 20px 28px;
+  }
+  #noGraph code {
+    background: #1a1e28; border: 1px solid #2d3340; border-radius: 4px;
+    padding: 2px 6px; color: #93c5fd; font-size: 13px;
+  }
+
+  #historySettings {
+    position: fixed; left: 50%; bottom: 68px; transform: translateX(-50%);
+    background: rgba(15,17,23,0.95); border: 1px solid #2d3340; border-radius: 10px;
+    padding: 12px 16px; display: none; flex-direction: column; gap: 6px;
+    width: min(340px, 80vw); box-sizing: border-box; backdrop-filter: blur(4px);
+    color: #cbd5e1; font-size: 12px; user-select: none;
+  }
+  #historySettings.active { display: flex; }
+  #historySettings .row { display: flex; align-items: center; gap: 6px; }
+  #historySettings .row label { flex: 0 0 130px; color: #94a3b8; }
+  #historySettings .row input[type=range] { flex: 1; }
+  #historySettings .row span.val { flex: 0 0 46px; text-align: right; }
+  #historySettings .row input[type=checkbox] { flex: 0 0 auto; }
+
+  .author { pointer-events: none; }
+  .author .avatar-ring { fill: none; stroke: #fff; stroke-width: 1.5px; }
+  .author .avatar-body { stroke: #0b0d12; stroke-width: 1px; }
+  .author text {
+    fill: #f1f5f9; font-size: 10px; paint-order: stroke; stroke: #0b0d12; stroke-width: 3px;
+  }
+  .author.hidden { display: none; }
+  .beam { opacity: 0.55; stroke: none; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <input id="search" type="text" placeholder="filter by path / dir...">
+  <div class="section">Layout</div>
+  <div class="row"><label>Repulsion</label><input id="charge" type="range" min="50" max="4000" value="1000"><span class="val" id="chargeVal"></span></div>
+  <div class="row"><label>Link distance</label><input id="distance" type="range" min="20" max="1200" value="200"><span class="val" id="distanceVal"></span></div>
+  <div class="row"><label>Collide padding</label><input id="collide" type="range" min="0" max="150" value="14"><span class="val" id="collideVal"></span></div>
+  <div class="row"><label>Node size</label><input id="nodeSize" type="range" min="5" max="150" value="20"><span class="val" id="nodeSizeVal"></span></div>
+  <div class="row"><label>Link thickness</label><input id="linkThickness" type="range" min="0" max="400" value="25"><span class="val" id="linkThicknessVal"></span></div>
+  <div class="row"><label>Cluster pull</label><input id="clusterStrength" type="range" min="0" max="100" value="10"><span class="val" id="clusterStrengthVal"></span></div>
+  <div class="section">Filter</div>
+  <div class="row"><label>Min edge weight</label><input id="minWeight" type="range" min="1" max="30" value="1"><span class="val" id="minWeightVal"></span></div>
+  <div class="row"><label>Labels always</label><input id="labelsAlways" type="checkbox" checked></div>
+  <div id="stats"></div>
+</div>
+<div id="tooltip"></div>
+<div id="historySettings">
+  <div class="row"><label>Seconds per commit</label><input id="secPerCommit" type="range" min="0.02" max="3" step="0.02" value="0.2"><span class="val" id="secPerCommitVal"></span></div>
+  <div class="row"><label>Auto-skip idle gaps</label><input id="autoSkip" type="checkbox" checked></div>
+  <div class="row"><label>Max gap (sec)</label><input id="maxGap" type="range" min="0.1" max="5" step="0.1" value="0.2"><span class="val" id="maxGapVal"></span></div>
+  <div class="row"><label>Beam duration (sec)</label><input id="beamDuration" type="range" min="0.1" max="3" step="0.1" value="1.0"><span class="val" id="beamDurationVal"></span></div>
+  <div class="row"><label>Show authors</label><input id="showAuthors" type="checkbox" checked></div>
+  <div class="row"><label>Author scale</label><input id="authorScale" type="range" min="5" max="80" value="30" step="1"><span class="val" id="authorScaleVal"></span></div>
+  <div class="row"><label>Loop</label><input id="loopPlayback" type="checkbox"></div>
+</div>
+<div id="historyBar">
+  <button id="playBtn">▶</button>
+  <input id="historySlider" type="range" min="0" max="1000" value="1000">
+  <span id="historyDate"></span>
+  <button id="historySettingsBtn">⚙</button>
+</div>
+<div id="noGit">no git history found for this repo</div>
+<div id="noGraph">
+  No <code>output/graph.json</code> found.<br><br>
+  Run the graph builder first, e.g.:<br>
+  <code>npm run build -- "&lt;path-to-repo&gt;" output/graph.json</code>
+</div>
+<svg></svg>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+Promise.all([
+  d3.json('../../output/graph.json'),
+  d3.json('../../output/history-graph.json').catch(() => null)
+]).then(([staticGraph, hg]) => {
+  const dirColor = d3.scaleOrdinal(d3.schemeTableau10);
+  const width = window.innerWidth, height = window.innerHeight;
+  const svg = d3.select('svg');
+  const g = svg.append('g');
+  const linkLayer = g.append('g');
+  const beamLayer = g.append('g');
+  const nodeLayer = g.append('g');
+  const authorLayer = g.append('g');
+
+  const zoom = d3.zoom().scaleExtent([0.03, 10]).on('zoom', (ev) => {
+    g.attr('transform', ev.transform);
+    const z = ev.transform.k;
+    d3.selectAll('.node').classed('label-visible', z > 2.2 || labelsAlways.checked);
+  });
+  svg.call(zoom);
+  svg.on('dblclick.zoom', null);
+
+  const topDirOf = id => id.split('/').slice(0, 2).join('/');
+
+  // --- live node/edge maps, mutated as history replays (or populated once for static mode) ---
+  const nodeMap = new Map(); // id -> node datum {id, topDir, weight, x, y, ...}
+  const edgeMap = new Map(); // "A B" -> {source, target, weight}
+  let nodes = [];
+  let edges = [];
+
+  const sizeScale = d3.scaleSqrt().range([4, 30]);
+  let sizeMultiplier = 2;
+  const scaledSize = d => sizeScale(d.weight || 0) * sizeMultiplier;
+  let linkThickness = 10;
+  const scaledLinkWidth = d => linkThickness; // flat thickness -- all links render the same width, regardless of edge weight
+
+  function getOrCreateNode(id) {
+    let n = nodeMap.get(id);
+    if (!n) {
+      n = { id, topDir: topDirOf(id), weight: 0, x: width / 2 + (Math.random() - 0.5) * 100, y: height / 2 + (Math.random() - 0.5) * 100 };
+      nodeMap.set(id, n);
+    }
+    return n;
+  }
+
+  // domain tracks the highest weight seen SO FAR in playback (monotonically increasing,
+  // never shrinks). A domain fixed to the final/eventual max made every node look tiny
+  // for most of history (nothing reaches "big" until the very end); a domain recomputed
+  // fresh every commit made whichever node briefly led look artificially maxed-out.
+  // Growing-only avoids both: sizes stay honest relative to "biggest so far" and never
+  // whipsaw commit-to-commit.
+  let runningMaxWeight = 1;
+  sizeScale.domain([0, runningMaxWeight]);
+
+  function recomputeWeights() {
+    const incoming = new Map();
+    for (const e of edgeMap.values()) incoming.set(e.target, (incoming.get(e.target) || 0) + e.weight);
+    for (const n of nodeMap.values()) n.weight = incoming.get(n.id) || 0;
+    const curMax = d3.max([...nodeMap.values()], n => n.weight) || 1;
+    if (curMax > runningMaxWeight) {
+      runningMaxWeight = curMax;
+      sizeScale.domain([0, runningMaxWeight]);
+    }
+  }
+
+  // cluster centers per top-level dir, used as a gentle pull so directories loosely group
+  const clusterCenters = new Map();
+  function ensureClusterCenter(dir) {
+    if (clusterCenters.has(dir)) return clusterCenters.get(dir);
+    const i = clusterCenters.size;
+    const angleStep = Math.PI * 0.61803398875 * 2; // golden-angle spread, avoids re-layout when dir count grows
+    const r = Math.min(width, height) * 0.32;
+    const c = { x: width / 2 + r * Math.cos(i * angleStep), y: height / 2 + r * Math.sin(i * angleStep) };
+    clusterCenters.set(dir, c);
+    return c;
+  }
+
+  let minWeight = 1;
+
+  const link = linkLayer.append('g');
+  const nodeSel0 = nodeLayer.append('g');
+
+  let linkSel = link.selectAll('line');
+  let nodeSel = nodeSel0.selectAll('g');
+
+  const tooltip = d3.select('#tooltip');
+  const neighborMap = new Map();
+  function rebuildNeighborMap() {
+    neighborMap.clear();
+    for (const e of edges) {
+      if (!neighborMap.has(e.source)) neighborMap.set(e.source, new Set());
+      if (!neighborMap.has(e.target)) neighborMap.set(e.target, new Set());
+      neighborMap.get(e.source).add(e.target);
+      neighborMap.get(e.target).add(e.source);
+    }
+  }
+
+  let highlighted = null;
+  function highlightNeighbors(id) {
+    if (highlighted === id) { highlighted = null; clearHighlight(); return; }
+    highlighted = id;
+    const keep = new Set([id, ...(neighborMap.get(id) || [])]);
+    nodeSel.classed('dim', d => !keep.has(d.id));
+    linkSel.classed('dim', d => (d.source.id || d.source) !== id && (d.target.id || d.target) !== id);
+  }
+  function clearHighlight() {
+    nodeSel.classed('dim', false);
+    linkSel.classed('dim', false);
+  }
+  svg.on('click', (ev) => { if (ev.target.tagName === 'svg' || ev.target.tagName === 'rect') { highlighted = null; clearHighlight(); } });
+
+  const sim = d3.forceSimulation([])
+    .force('link', d3.forceLink([]).id(d => d.id)
+      .distance(140).strength(e => Math.min(1, 0.15 + e.weight / 25)))
+    .force('charge', d3.forceManyBody().strength(-450))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collide', d3.forceCollide(d => scaledSize(d) + 14))
+    .force('clusterX', d3.forceX(d => ensureClusterCenter(d.topDir).x).strength(0.15))
+    .force('clusterY', d3.forceY(d => ensureClusterCenter(d.topDir).y).strength(0.15));
+
+  sim.on('tick', () => {
+    linkSel.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+           .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  const labelsAlways = document.getElementById('labelsAlways');
+  const statsEl = document.getElementById('stats');
+
+  // re-run the D3 joins against the current nodeMap/edgeMap contents.
+  // called once for static mode, and after every commit step in history mode.
+  function render() {
+    nodes = [...nodeMap.values()];
+    // fresh copies -- d3.forceLink mutates .source/.target from ID strings into node
+    // object references in place, which would otherwise permanently corrupt the
+    // objects stored in edgeMap (breaking every future weight/key computation that
+    // expects e.source/e.target to still be plain path strings)
+    edges = [...edgeMap.values()].map(e => ({ source: e.source, target: e.target, weight: e.weight }));
+    recomputeWeights();
+    rebuildNeighborMap();
+
+    sim.nodes(nodes);
+    sim.force('link').links(edges);
+
+    linkSel = link.selectAll('line').data(edges, d => d.source + '>' + d.target)
+      .join(
+        enter => enter.append('line').attr('class', 'link')
+          .attr('stroke-width', d => scaledLinkWidth(d))
+          .attr('stroke-opacity', d => Math.min(0.5, 0.15 + d.weight / 40)),
+        update => update
+          .attr('stroke-width', d => scaledLinkWidth(d))
+          .attr('stroke-opacity', d => Math.min(0.5, 0.15 + d.weight / 40)),
+        exit => exit.remove()
+      )
+      .style('display', d => (d.weight >= minWeight) ? null : 'none');
+
+    nodeSel = nodeSel0.selectAll('g').data(nodes, d => d.id)
+      .join(enter => {
+        const gEnter = enter.append('g').attr('class', 'node')
+          .call(d3.drag()
+            .on('start', (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag', (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+            .on('end', (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+        gEnter.append('circle').attr('fill', d => dirColor(d.topDir));
+        gEnter.append('text').attr('dy', 3).text(d => d.id.split('/').pop());
+        gEnter
+          .on('mouseenter', (ev, d) => {
+            tooltip.style('display', 'block')
+              .html(`<b>${d.id}</b><br>referenced by ${d.weight} usages`);
+          })
+          .on('mousemove', (ev) => {
+            tooltip.style('left', (ev.clientX + 14) + 'px').style('top', (ev.clientY + 10) + 'px');
+          })
+          .on('mouseleave', () => tooltip.style('display', 'none'))
+          .on('click', (ev, d) => highlightNeighbors(d.id));
+        return gEnter;
+      });
+
+    nodeSel.select('circle').attr('r', d => scaledSize(d));
+    nodeSel.select('text').attr('dx', d => scaledSize(d) + 3);
+    nodeSel.classed('label-visible', labelsAlways.checked);
+
+    sim.force('collide', d3.forceCollide(d => scaledSize(d) + (+document.getElementById('collide').value)));
+    // small reheat only -- new nodes/edges still need to settle, but a big alpha jump
+    // every commit made the whole existing layout visibly jolt/jitter during playback
+    if (sim.alpha() < 0.08) sim.alpha(0.08);
+    sim.restart();
+
+    statsEl.textContent = `${nodes.length} files, ${edges.length} coupling edges`;
+  }
+
+  document.getElementById('search').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    nodeSel.classed('dim', d => !(!q || d.id.toLowerCase().includes(q)));
+    linkSel.classed('dim', d => !(!q || d.source.id.toLowerCase().includes(q) || d.target.id.toLowerCase().includes(q)));
+  });
+
+  labelsAlways.addEventListener('change', () => {
+    nodeSel.classed('label-visible', labelsAlways.checked);
+  });
+
+  function bindSlider(id, valId, onInput, fmt = v => v) {
+    const el = document.getElementById(id);
+    const val = document.getElementById(valId);
+    const update = () => { val.textContent = fmt(el.value); onInput(+el.value); };
+    el.addEventListener('input', update);
+    update();
+  }
+
+  bindSlider('charge', 'chargeVal', v => { sim.force('charge').strength(-v); sim.alpha(0.5).restart(); });
+  bindSlider('distance', 'distanceVal', v => { sim.force('link').distance(v); sim.alpha(0.5).restart(); });
+  bindSlider('collide', 'collideVal', v => { sim.force('collide', d3.forceCollide(d => scaledSize(d) + v)); sim.alpha(0.5).restart(); });
+  bindSlider('nodeSize', 'nodeSizeVal', v => {
+    sizeMultiplier = v / 10;
+    nodeSel.select('circle').attr('r', d => scaledSize(d));
+    nodeSel.select('text').attr('dx', d => scaledSize(d) + 3);
+    sim.force('collide', d3.forceCollide(d => scaledSize(d) + (+document.getElementById('collide').value)));
+    sim.alpha(0.5).restart();
+  }, v => (v / 10).toFixed(1) + 'x');
+  bindSlider('linkThickness', 'linkThicknessVal', v => {
+    linkThickness = v / 10;
+    linkSel.attr('stroke-width', d => scaledLinkWidth(d));
+  }, v => (v / 10).toFixed(1) + 'x');
+  bindSlider('clusterStrength', 'clusterStrengthVal', v => {
+    const s = v / 100;
+    sim.force('clusterX').strength(s);
+    sim.force('clusterY').strength(s);
+    sim.alpha(0.5).restart();
+  }, v => (v / 100).toFixed(2));
+  bindSlider('minWeight', 'minWeightVal', v => {
+    minWeight = v;
+    linkSel.style('display', d => (d.weight >= minWeight) ? null : 'none');
+  });
+
+  const historyBar = document.getElementById('historyBar');
+  const noGit = document.getElementById('noGit');
+
+  if (!hg || !hg.hasGit || !hg.commits.length) {
+    // static fallback: load the current-tree graph.json once, no playback
+    noGit.style.display = 'block';
+    for (const n of staticGraph.nodes) getOrCreateNode(n.id);
+    for (const e of staticGraph.edges) edgeMap.set(`${e.source} ${e.target}`, { source: e.source, target: e.target, weight: e.weight });
+    render();
+    return;
+  }
+
+  // ---- History playback (real per-commit edge diffs) ----
+  const commits = hg.commits; // already in chronological order
+  const N = commits.length;
+  const dateFmt = d3.timeFormat('%Y-%m-%d %H:%M');
+
+  const authorNames = [...new Set(commits.map(c => c.author))];
+  const authorColor = d3.scaleOrdinal(d3.schemeSet2).domain(authorNames);
+
+  const authorState = new Map(authorNames.map(a => [a, {
+    name: a,
+    x: width / 2 + (Math.random() - 0.5) * 40, y: height / 2 + (Math.random() - 0.5) * 40,
+    targetX: width / 2, targetY: height / 2,
+    active: false,
+    opacity: 0,
+    lastActiveAt: -Infinity
+  }]));
+
+  const authorSel = authorLayer.selectAll('g').data(authorNames).join('g')
+    .attr('class', 'author hidden');
+  // inner group holds the icon + label so it can be scaled independently of the
+  // outer group's translate(x,y) positioning
+  const authorVisual = authorSel.append('g').attr('class', 'author-visual');
+  let authorScale = 3;
+  // simple person icon: circular head + a clipped disc for shoulders, in the author's color,
+  // with a white ring around the whole thing so it reads clearly against any node color
+  const AVATAR_R = 9;
+  authorVisual.append('circle').attr('class', 'avatar-ring').attr('r', AVATAR_R + 1.5);
+  const avatarClip = authorVisual.append('clipPath').attr('id', (d, i) => `avatar-clip-${i}`);
+  avatarClip.append('circle').attr('r', AVATAR_R);
+  authorVisual.each(function (d, i) {
+    const sel = d3.select(this);
+    sel.append('circle').attr('class', 'avatar-body').attr('r', AVATAR_R).attr('fill', authorColor(d));
+    const g = sel.append('g').attr('clip-path', `url(#avatar-clip-${i})`);
+    // head
+    g.append('circle').attr('cx', 0).attr('cy', -AVATAR_R * 0.32).attr('r', AVATAR_R * 0.4).attr('fill', '#0b0d12').attr('fill-opacity', 0.55);
+    // shoulders
+    g.append('circle').attr('cx', 0).attr('cy', AVATAR_R * 1.15).attr('r', AVATAR_R * 0.85).attr('fill', '#0b0d12').attr('fill-opacity', 0.55);
+  });
+  authorVisual.append('text').attr('dx', AVATAR_R + 4).attr('dy', 3).text(d => d);
+  authorVisual.attr('transform', `scale(${authorScale})`);
+
+  historyBar.classList.add('active');
+  const slider = document.getElementById('historySlider');
+  const dateLabel = document.getElementById('historyDate');
+  const playBtn = document.getElementById('playBtn');
+  slider.max = N - 1;
+  slider.value = N - 1;
+
+  const settingsBtn = document.getElementById('historySettingsBtn');
+  const settingsPanel = document.getElementById('historySettings');
+  settingsBtn.addEventListener('click', () => settingsPanel.classList.toggle('active'));
+
+  const secPerCommitEl = document.getElementById('secPerCommit');
+  const autoSkipEl = document.getElementById('autoSkip');
+  const maxGapEl = document.getElementById('maxGap');
+  const beamDurationEl = document.getElementById('beamDuration');
+  const showAuthorsEl = document.getElementById('showAuthors');
+  const loopEl = document.getElementById('loopPlayback');
+
+  function bindDisplay(el, valId, fmt) {
+    const val = document.getElementById(valId);
+    const update = () => val.textContent = fmt(+el.value);
+    el.addEventListener('input', update);
+    update();
+  }
+  bindDisplay(secPerCommitEl, 'secPerCommitVal', v => v.toFixed(2) + 's');
+  bindDisplay(maxGapEl, 'maxGapVal', v => v.toFixed(1) + 's');
+  bindDisplay(beamDurationEl, 'beamDurationVal', v => v.toFixed(1) + 's');
+  showAuthorsEl.addEventListener('change', () => {
+    authorSel.classed('hidden', !showAuthorsEl.checked);
+    beamLayer.style('display', showAuthorsEl.checked ? null : 'none');
+  });
+
+  const authorScaleEl = document.getElementById('authorScale');
+  bindDisplay(authorScaleEl, 'authorScaleVal', v => (v / 10).toFixed(1) + 'x');
+  authorScaleEl.addEventListener('input', () => {
+    authorScale = +authorScaleEl.value / 10;
+    authorVisual.attr('transform', `scale(${authorScale})`);
+  });
+
+  let activeBeams = []; // {author, targetId, expiresAt}
+
+  // apply the edge diffs for every commit up to and including `step`, replaying
+  // from scratch each time the slider jumps (cheap enough: diffs are small, and
+  // we cap absolute recompute by only replaying deltas, not full recomputation)
+  let appliedUpToStep = -1;
+
+  function applyCommitForward(step) {
+    const c = commits[step];
+    for (const e of c.added) {
+      getOrCreateNode(e.source); getOrCreateNode(e.target);
+      edgeMap.set(`${e.source} ${e.target}`, { source: e.source, target: e.target, weight: e.weight });
+    }
+    for (const e of c.removed) {
+      edgeMap.delete(`${e.source} ${e.target}`);
+    }
+    for (const f of c.files) getOrCreateNode(f);
+    // files deleted or renamed away stop existing -- drop the node (and any edges
+    // still pointing at it) so it doesn't linger as a permanently disconnected ghost
+    for (const f of (c.deletedFiles || [])) {
+      nodeMap.delete(f);
+      for (const key of edgeMap.keys()) {
+        if (key.startsWith(f + ' ') || key.endsWith(' ' + f)) edgeMap.delete(key);
+      }
+    }
+  }
+
+  function rebuildStateUpTo(step) {
+    nodeMap.clear();
+    edgeMap.clear();
+    for (let i = 0; i <= step; i++) applyCommitForward(i);
+    appliedUpToStep = step;
+  }
+
+  function goToStep(step) {
+    if (step === appliedUpToStep) return;
+    if (step === appliedUpToStep + 1) {
+      applyCommitForward(step);
+    } else {
+      // jumped (slider drag, loop restart, etc) -- cheaper to replay from scratch
+      // than to diff backward through removed/added edges
+      rebuildStateUpTo(step);
+    }
+    appliedUpToStep = step;
+    render();
+  }
+
+  function applyUpTo(step) {
+    goToStep(step);
+    const t = new Date(commits[step].date).getTime();
+    dateLabel.textContent = dateFmt(new Date(t)) + `  ·  ${commits[step].author}  ·  (${nodeMap.size} files, ${edgeMap.size} edges)`;
+  }
+
+  function fireCommit(step) {
+    const c = commits[step];
+    applyUpTo(step);
+
+    const st = authorState.get(c.author);
+    const touched = c.files.map(f => nodeMap.get(f)).filter(Boolean);
+    if (touched.length) {
+      const cx = d3.mean(touched, d => d.x ?? width / 2);
+      const cy = d3.mean(touched, d => d.y ?? height / 2);
+      const angle = Math.random() * Math.PI * 2;
+      const offset = 22 + Math.random() * 14;
+      st.targetX = cx + Math.cos(angle) * offset;
+      st.targetY = cy + Math.sin(angle) * offset;
+      st.active = true;
+      st.lastActiveAt = performance.now();
+    }
+
+    if (showAuthorsEl.checked && touched.length) {
+      const now = performance.now();
+      const durMs = +beamDurationEl.value * 1000;
+      touched.forEach(tf => activeBeams.push({ author: c.author, targetId: tf.id, expiresAt: now + durMs }));
+    }
+
+    const pulseTargets = touched.map(d => d.id);
+    if (pulseTargets.length && pulseTargets.length < 60) {
+      nodeSel.filter(d => pulseTargets.includes(d.id)).classed('pulse', false);
+      void nodeLayer.node().offsetWidth;
+      nodeSel.filter(d => pulseTargets.includes(d.id)).classed('pulse', true);
+    }
+  }
+
+  let lastRenderTime = performance.now();
+  function renderAuthorsAndBeams() {
+    const now0 = performance.now();
+    const dt = Math.min(0.25, (now0 - lastRenderTime) / 1000);
+    lastRenderTime = now0;
+
+    const EASE_PER_SEC = 2.5;
+    const alpha = 1 - Math.exp(-EASE_PER_SEC * dt);
+    // fast fade-in on activity, slower fade-out to idle -- separate rates so an author
+    // popping back in reads instantly, while idle authors linger visibly before fading
+    const FADE_IN_PER_SEC = 12;
+    const FADE_OUT_PER_SEC = 1.2;
+    const IDLE_GRACE_MS = 400; // stay fully visible briefly after the last commit before fading
+    for (const st of authorState.values()) {
+      st.x += (st.targetX - st.x) * alpha;
+      st.y += (st.targetY - st.y) * alpha;
+
+      const msSinceActive = now0 - st.lastActiveAt;
+      const targetOpacity = st.active && msSinceActive < IDLE_GRACE_MS ? 1 : 0;
+      const fadeRate = targetOpacity > st.opacity ? FADE_IN_PER_SEC : FADE_OUT_PER_SEC;
+      const fadeAlpha = 1 - Math.exp(-fadeRate * dt);
+      st.opacity += (targetOpacity - st.opacity) * fadeAlpha;
+      if (st.opacity < 0.01) st.opacity = 0;
+    }
+
+    authorSel
+      .classed('hidden', d => !showAuthorsEl.checked || authorState.get(d).opacity <= 0)
+      .style('opacity', d => authorState.get(d).opacity)
+      .attr('transform', d => { const s = authorState.get(d); return `translate(${s.x},${s.y})`; });
+
+    const now = performance.now();
+    activeBeams = activeBeams.filter(b => b.expiresAt > now);
+    const beamSel = beamLayer.selectAll('polygon').data(activeBeams, (d, i) => d.author + d.targetId + d.expiresAt);
+    beamSel.exit().remove();
+    beamSel.enter().append('polygon').attr('class', 'beam')
+      .merge(beamSel)
+      .attr('fill', d => authorColor(d.author))
+      .attr('fill-opacity', d => Math.max(0, Math.min(0.55, (d.expiresAt - now) / 1000 * 0.9)))
+      .attr('points', d => {
+        const a = authorState.get(d.author);
+        const n = nodeMap.get(d.targetId);
+        if (!n) return '';
+        const nodeRadius = scaledSize(n);
+        const dx = n.x - a.x, dy = n.y - a.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const px = -dy / dist, py = dx / dist;
+        const half = nodeRadius;
+        const bx1 = n.x + px * half, by1 = n.y + py * half;
+        const bx2 = n.x - px * half, by2 = n.y - py * half;
+        return `${a.x},${a.y} ${bx1},${by1} ${bx2},${by2}`;
+      });
+  }
+
+  sim.on('tick.authors', renderAuthorsAndBeams);
+  function rafLoop() { renderAuthorsAndBeams(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(renderAuthorsAndBeams, 200);
+
+  slider.addEventListener('input', () => {
+    curStep = +slider.value;
+    applyUpTo(curStep);
+    // if playback was running, keep it running from the new scrub position instead
+    // of forcing a pause -- stepOnce() picks up from curStep on its next tick
+    if (playing) {
+      clearInterval(intervalId);
+      intervalId = setInterval(stepOnce, +secPerCommitEl.value * 1000);
+    }
+  });
+
+  let playing = false, intervalId = null, curStep = N - 1;
+
+  function stepOnce() {
+    if (curStep >= N - 1) {
+      if (loopEl.checked) { curStep = -1; } else { playing = false; playBtn.textContent = '▶'; clearInterval(intervalId); return; }
+    }
+    curStep++;
+    slider.value = curStep;
+    fireCommit(curStep);
+
+    const baseDelay = +secPerCommitEl.value * 1000;
+    let delay = baseDelay;
+    if (autoSkipEl.checked && curStep < N - 1) {
+      const gapSec = (new Date(commits[curStep + 1].date) - new Date(commits[curStep].date)) / 1000;
+      delay = Math.min(baseDelay + gapSec * 5, +maxGapEl.value * 1000);
+      delay = Math.max(delay, baseDelay);
+    }
+    clearInterval(intervalId);
+    intervalId = setInterval(stepOnce, delay);
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (playing) {
+      playing = false; playBtn.textContent = '▶'; clearInterval(intervalId);
+      return;
+    }
+    if (curStep >= N - 1 && !loopEl.checked) curStep = -1;
+    playing = true; playBtn.textContent = '⏸';
+    stepOnce();
+  });
+
+  curStep = N - 1;
+  applyUpTo(curStep);
+}).catch((err) => {
+  console.error(err);
+  document.getElementById('noGraph').style.display = 'block';
+});
+</script>
+</body>
+</html>

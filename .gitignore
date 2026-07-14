@@ -1,0 +1,6 @@
+node_modules/
+
+# generated per-repo — regenerate with build-graph.js / build-history-graph.js
+output/*.json
+
+*.log
