@@ -8,6 +8,7 @@
   svg { width: 100vw; height: 100vh; display: block; }
   .link { stroke: #4a5568; }
   .node circle { stroke: #0b0d12; stroke-width: 1px; cursor: pointer; }
+  .node circle.external-node { stroke: #64748b; stroke-width: 1.5px; stroke-dasharray: 3 2; }
   .node text {
     fill: #cbd5e1; font-size: 10px; pointer-events: none; paint-order: stroke;
     stroke: #0b0d12; stroke-width: 3px; opacity: 0; transition: opacity 0.15s;
@@ -159,6 +160,17 @@ Promise.all([
 
   const topDirOf = id => id.split('/').slice(0, 2).join('/');
 
+  // external package metadata (version, description) collected from whichever
+  // source has it -- history-graph.json first so its data isn't clobbered, then
+  // graph.json (current tree) overrides with fresher info for the same package
+  const externalMeta = new Map();
+  for (const n of (hg && hg.nodes) || []) {
+    if (n.external) externalMeta.set(n.id, n);
+  }
+  for (const n of staticGraph.nodes) {
+    if (n.external) externalMeta.set(n.id, n);
+  }
+
   // --- live node/edge maps, mutated as history replays (or populated once for static mode) ---
   const nodeMap = new Map(); // id -> node datum {id, topDir, weight, x, y, ...}
   const edgeMap = new Map(); // "A B" -> {source, target, weight}
@@ -174,7 +186,17 @@ Promise.all([
   function getOrCreateNode(id) {
     let n = nodeMap.get(id);
     if (!n) {
-      n = { id, topDir: topDirOf(id), weight: 0, x: width / 2 + (Math.random() - 0.5) * 100, y: height / 2 + (Math.random() - 0.5) * 100 };
+      const external = id.startsWith('external:');
+      const meta = external ? externalMeta.get(id) : null;
+      n = {
+        id, topDir: external ? 'external' : topDirOf(id), weight: 0,
+        x: width / 2 + (Math.random() - 0.5) * 100, y: height / 2 + (Math.random() - 0.5) * 100,
+        external,
+        packageName: meta ? meta.packageName : null,
+        version: meta ? meta.version : null,
+        description: meta ? meta.description : null,
+        isBuiltin: meta ? !!meta.isBuiltin : false,
+      };
       nodeMap.set(id, n);
     }
     return n;
@@ -298,12 +320,20 @@ Promise.all([
             .on('start', (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
             .on('drag', (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
             .on('end', (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
-        gEnter.append('circle').attr('fill', d => dirColor(d.topDir));
-        gEnter.append('text').attr('dy', 3).text(d => d.id.split('/').pop());
+        gEnter.append('circle')
+          .attr('fill', d => d.external ? '#1a1e28' : dirColor(d.topDir))
+          .attr('class', d => d.external ? 'external-node' : null);
+        gEnter.append('text').attr('dy', 3)
+          .text(d => d.external ? (d.packageName || d.id.replace('external:', '')) : d.id.split('/').pop());
         gEnter
           .on('mouseenter', (ev, d) => {
-            tooltip.style('display', 'block')
-              .html(`<b>${d.id}</b><br>referenced by ${d.weight} usages`);
+            const label = d.external
+              ? `<b>${d.packageName || d.id}</b> <span style="opacity:0.6">(${d.isBuiltin ? 'Node built-in' : 'external package'})</span>`
+                + (d.version ? `<br>v${d.version}` : '')
+                + (d.description ? `<br>${d.description}` : '')
+                + `<br>imported by ${d.weight} file(s)`
+              : `<b>${d.id}</b><br>referenced by ${d.weight} usages`;
+            tooltip.style('display', 'block').html(label);
           })
           .on('mousemove', (ev) => {
             tooltip.style('left', (ev.clientX + 14) + 'px').style('top', (ev.clientY + 10) + 'px');

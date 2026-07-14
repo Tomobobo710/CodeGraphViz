@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync, execFileSync } = require('child_process');
-const { analyzeSource, COMMON_GLOBALS } = require('../../core/graph-core');
+const { analyzeSource, resolveSpecifier, getExternalPackageInfo } = require('../../core/graph-core');
 
 const ROOT = process.argv[2];
 const OUT = process.argv[3] || 'history-graph.json';
@@ -59,13 +59,53 @@ const relevant = commits.filter(c => c.changes.length > 0);
 console.error(`${relevant.length}/${commits.length} commits touch JS files`);
 
 // Running state across the whole walk.
-const fileDefs = {};   // rel -> Set(names)
-const fileRefs = {};   // rel -> Set(names)
-const nameOwners = {}; // globalName -> rel (first definer wins, matches build-graph.js)
+const fileDefs = {};    // rel -> Set(names)
+const fileRefs = {};    // rel -> Set(names)
+const fileImports = {}; // rel -> Array<{specifier, kind, names}>
+const nameOwners = {};  // globalName -> rel (first definer wins, matches build-graph.js)
 const allFilesEverSeen = new Set();
+const externalNodesSeen = new Map(); // packageName -> node info (accumulated across all history)
+
+// Note: external package metadata (version/description) is read from whatever
+// node_modules exists NOW, not as of each historical commit -- reinstalling
+// dependencies at every commit isn't practical. A package that was added/removed/
+// upgraded over the repo's history will show today's info at every point it
+// appears, which is a known simplification.
+function resolveImportsFor(rel) {
+    const edgesFromThisFile = [];
+    for (const imp of (fileImports[rel] || [])) {
+        const resolved = resolveSpecifier(imp.specifier, rel, ROOT);
+        if (!resolved) continue;
+        const weight = Math.max(1, imp.names.length);
+        if (resolved.type === 'local') {
+            if (resolved.relPath === rel) continue;
+            if (!fileDefs[resolved.relPath]) continue; // target doesn't exist at this point in history
+            edgesFromThisFile.push({ target: resolved.relPath, weight });
+        } else {
+            const pkgId = `external:${resolved.packageName}`;
+            if (!externalNodesSeen.has(pkgId)) {
+                const info = getExternalPackageInfo(resolved.packageName, ROOT);
+                externalNodesSeen.set(pkgId, { id: pkgId, dir: 'external', external: true, packageName: resolved.packageName, isBuiltin: resolved.isBuiltin, ...info });
+            }
+            edgesFromThisFile.push({ target: pkgId, weight });
+        }
+    }
+    return edgesFromThisFile;
+}
 
 function computeEdges() {
     const edges = {}; // "A B" -> weight
+
+    // explicit import/export-from edges, resolved fresh each call since target
+    // files can appear/disappear as history plays out
+    for (const rel of Object.keys(fileImports)) {
+        for (const { target, weight } of resolveImportsFor(rel)) {
+            const key = `${rel} ${target}`;
+            edges[key] = (edges[key] || 0) + weight;
+        }
+    }
+
+    // legacy global-namespace matching, for non-module files
     for (const rel of Object.keys(fileRefs)) {
         const refs = fileRefs[rel];
         if (!refs) continue;
@@ -117,6 +157,7 @@ for (const c of relevant) {
             }
             delete fileDefs[file];
             delete fileRefs[file];
+            delete fileImports[file];
             continue;
         }
         let src;
@@ -129,6 +170,7 @@ for (const c of relevant) {
         if (!result) continue; // parse error, keep previous state for this file
         fileDefs[file] = result.defs;
         fileRefs[file] = result.refs;
+        fileImports[file] = result.imports;
         allFilesEverSeen.add(file);
         for (const n of result.defs) touchedNames.add(n);
     }
@@ -170,8 +212,12 @@ for (const c of relevant) {
 }
 
 // final node list = union of every file ever seen (matches build-graph.js's "current tree" shape,
-// but historically anything that existed at any point is included so it doesn't vanish/reappear oddly)
-const nodes = [...allFilesEverSeen].map(rel => ({ id: rel, dir: path.dirname(rel) }));
+// but historically anything that existed at any point is included so it doesn't vanish/reappear oddly),
+// plus every external package that was ever imported anywhere in history
+const nodes = [
+    ...[...allFilesEverSeen].map(rel => ({ id: rel, dir: path.dirname(rel), external: false })),
+    ...externalNodesSeen.values(),
+];
 
 fs.writeFileSync(OUT, JSON.stringify({ hasGit: true, nodes, commits: snapshots }, null, 2));
-console.error(`Wrote ${nodes.length} nodes, ${snapshots.length} commit snapshots to ${OUT}`);
+console.error(`Wrote ${nodes.length} nodes (${externalNodesSeen.size} external), ${snapshots.length} commit snapshots to ${OUT}`);

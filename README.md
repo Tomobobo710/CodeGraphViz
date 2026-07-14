@@ -3,27 +3,40 @@
 <img width="3793" height="1766" alt="image" src="https://github.com/user-attachments/assets/525f3752-33ae-4c5f-8f2c-9f5064f6dbcc" />
 
 
-A dependency graph visualizer for JavaScript codebases that don't use modules —
-the classic "pile of scripts sharing a global namespace" style (no `import`,
-no bundler, everything talks through shared globals at runtime).
+A dependency graph visualizer for JavaScript codebases. Draws real code
+coupling — which files define something and which other files use it — as
+an interactive force-directed graph, optionally animated over the repo's
+real git history.
 
 Inspired by [Gource](https://gource.io/): Gource shows you *when* files
 changed and *where* they live in the folder tree, animated over a repo's git
 history. It can't show you *what actually talks to what* — the tree layout
 is folder structure, not code coupling. This tool parses the JS itself and
-draws a graph of real coupling instead: which files define a class or
-function, and which other files use it — optionally animated over the repo's
-real git history, Gource-style.
+draws a graph of real coupling instead, Gource-style playback included.
 
 ## Supported codebases
 
-**Currently: plain, non-modular JavaScript only** — code written as
-`class Foo {}` / `function bar() {}` at the top level of a file, with no
-`import`/`export` and no bundler, where files communicate through shared
-global names resolved at runtime (classic multi-`<script>`-tag projects).
+Handles three JavaScript dependency styles, and can mix them within the same
+project:
 
-Not yet supported: ES modules, TypeScript, any bundler-based project,
-and any language other than JavaScript. See **Known limitations** below.
+- **ES modules** — `import`/`export` statements, resolved directly from the
+  import specifier to a file (most reliable path)
+- **CommonJS** — `require(...)` calls (anywhere in a file, not just at the
+  top) and `module.exports`/`exports.x`, also resolved directly from the
+  specifier
+- **Plain global-scope JS** — no `import`/`require` at all; classic
+  multi-`<script>`-tag codebases where files communicate through shared
+  global names (`class Foo {}` in one file, bare `Foo` in another). Coupling
+  here is inferred by matching definitions to usages, since there's no
+  explicit statement pointing at the source file — a heuristic, not certain
+
+External npm packages and Node built-in modules (`fs`, `path`, etc.) show up
+as their own nodes on the graph, with version/description pulled from
+`node_modules` when available.
+
+Not yet supported: TypeScript syntax (`.ts`/`.tsx` won't parse — acorn is
+JS-only), bundler-specific resolution (path aliases, etc.), and any language
+other than JavaScript. See **Known limitations** below.
 
 ## Project layout
 
@@ -50,36 +63,53 @@ the same `output/` + `viewer/` pair.
 
 ## How it works
 
-1. **`src/languages/javascript/build-graph.js`** walks every `.js` file in a
-   repo with [acorn](https://github.com/acornjs/acorn), and for each file
-   records:
+1. **`src/core/graph-core.js`** parses one file's source with
+   [acorn](https://github.com/acornjs/acorn) (`sourceType: 'module'`, falling
+   back to `'script'` for files that error on that) and extracts:
    - every top-level `class`, `function`, and `const`/`let`/`var` it defines
+   - every `import` / re-export-from statement, and every `require(...)`
+     call anywhere in the file (default/named/namespace/side-effect-only
+     variants all handled)
    - every identifier it *references* that isn't its own and isn't a
-     browser/JS built-in (`window`, `Math`, `fetch`, etc.)
+     browser/JS/Node built-in (`window`, `Math`, `fetch`, `fs`, etc.) — the
+     legacy global-namespace matching path, used for files with no
+     `import`/`require` at all
 
-   If file B references a name only defined in file A, that's an edge
-   `B -> A`. Output is `graph.json`: nodes (files) + weighted edges (reference
-   counts), reflecting the current state of the working tree.
+   `import`/`require` specifiers get resolved directly to a file path (or
+   classified as an external package/Node built-in) via
+   `resolveSpecifier()` — no name-guessing needed there, since the statement
+   says exactly what it depends on. The global-namespace path is a fallback
+   heuristic for everything else.
 
-2. **`src/languages/javascript/build-history-graph.js`** does the same
+2. **`src/languages/javascript/build-graph.js`** runs that analysis across
+   every `.js` file in a repo and combines both edge sources (explicit
+   imports/requires + inferred global-namespace matches) into `graph.json`:
+   nodes (files, plus external packages) + weighted edges, reflecting the
+   current state of the working tree.
+
+3. **`src/languages/javascript/build-history-graph.js`** does the same
    analysis but walks the repo's **entire git history**, commit by commit,
    re-parsing only the files each commit touched (via `git show
-   <hash>:<path>`) and tracking definitions, references, and file renames
-   incrementally. Output is `history-graph.json`: a per-commit list of edge
-   diffs (added/removed), small enough to replay in a browser even for a repo
-   with hundreds of commits.
-
-3. **`src/core/graph-core.js`** is the shared parser both build scripts use.
+   <hash>:<path>`) and tracking definitions, references, imports, and file
+   renames incrementally. Output is `history-graph.json`: a per-commit list
+   of edge diffs (added/removed), small enough to replay in a browser even
+   for a repo with hundreds of commits. External package version/description
+   metadata reflects whatever's in `node_modules` *now*, not as of each
+   historical commit — reinstalling dependencies at every commit isn't
+   practical.
 
 4. **`src/viewer/viewer.html`** loads `output/graph.json` and
    `output/history-graph.json` and renders an interactive force-directed
    graph with [D3](https://d3js.org/). If history data is present it enables
    a Gource-style playback timeline; otherwise it falls back to a static view
-   of the current tree.
+   of the current tree. External packages render as visually distinct nodes
+   (dashed ring) with a tooltip showing version/description when known.
 
-This is a heuristic, not ground truth. It can miss edges (dynamic access like
-`window[name]`) or invent false ones (two files that happen to define a
-same-named local that isn't really shared).
+The global-namespace matching path is a heuristic, not ground truth — it can
+miss edges (dynamic access like `window[name]`) or invent false ones (two
+files that happen to define a same-named local that isn't really shared).
+The `import`/`require` path doesn't have this problem, since it resolves
+from an explicit statement rather than guessing.
 
 ## Prerequisites
 
@@ -137,7 +167,9 @@ Open `http://localhost:8090`.
 
 Node size = how many places reference it (in-degree, fixed relative to the
 highest weight seen so far during playback — never rescales down).
-Node color = top-level directory.
+Node color = top-level directory. External packages (npm dependencies, Node
+built-ins) render with a dashed ring and are labeled by package name instead
+of file path; hover for version/description when available.
 
 ### History playback (when `history-graph.json` is present)
 
@@ -160,11 +192,18 @@ and can't analyze.
 
 ## Known limitations
 
-- No ES module support: `import`/`export` statements aren't parsed at all,
-  so a modern module-based JS project will show zero edges. Would need a
-  second analysis path that resolves import specifiers to file paths instead
-  of matching on global names.
+- No TypeScript support: `.ts`/`.tsx` files won't parse (acorn doesn't
+  understand TypeScript syntax), so they're silently skipped with a parse
+  error logged to the console.
+- No bundler-aware resolution: path aliases (e.g. `@/utils/foo` configured
+  in a bundler, not a real relative path) won't resolve and are treated as
+  dangling imports.
+- Dynamic imports (`import(...)` as an expression) and dynamic `require`
+  (`require(someVariable)`) aren't tracked — only static string-literal
+  specifiers are.
 - JavaScript only. No C++, Python, or other language support.
 - History parsing assumes standard git rename detection (`git log
   --name-status`); very aggressive refactors that git can't recognize as a
   rename will show as a delete + a brand new unconnected file.
+- External package metadata during history playback reflects the *current*
+  `node_modules`, not what was actually installed at each historical commit.
